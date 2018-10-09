@@ -94,6 +94,9 @@ ngx_rtmp_cycle(ngx_rtmp_session_t *s)
     s->ping_evt.handler = ngx_rtmp_ping;
     ngx_rtmp_reset_ping(s);
 
+    ngx_log_debug1(NGX_LOG_DEBUG_RTMP, s->connection->log, 0,
+            "ping: cycle", 0);
+
     ngx_rtmp_recv(c->read);
 }
 
@@ -143,10 +146,11 @@ ngx_rtmp_reset_ping(ngx_rtmp_session_t *s)
             "ping: wait %Mms", cscf->ping);
 }
 
-
 static void
 ngx_rtmp_ping(ngx_event_t *pev)
 {
+
+    /* callback on timeout */
     ngx_connection_t           *c;
     ngx_rtmp_session_t         *s;
     ngx_rtmp_core_srv_conf_t   *cscf;
@@ -156,8 +160,15 @@ ngx_rtmp_ping(ngx_event_t *pev)
 
     cscf = ngx_rtmp_get_module_srv_conf(s, ngx_rtmp_core_module);
 
+
+/* every x seconds */
+    ngx_log_debug1(NGX_LOG_DEBUG_RTMP, s->connection->log, 0,
+            "ping: ngx_rtmp_ping", 0);
+
     /* i/o event has happened; no need to ping */
     if (s->ping_reset) {
+        ngx_log_debug1(NGX_LOG_DEBUG_RTMP, s->connection->log, 0,
+                "ping: ngx_rtmp_ping: ping_reset", 0);
         ngx_rtmp_reset_ping(s);
         return;
     }
@@ -180,9 +191,14 @@ ngx_rtmp_ping(ngx_event_t *pev)
             "ping: schedule %Mms", cscf->ping_timeout);
 
     if (ngx_rtmp_send_ping_request(s, (uint32_t)ngx_current_msec) != NGX_OK) {
+        ngx_log_debug1(NGX_LOG_DEBUG_RTMP, s->connection->log, 0,
+                "ping: ngx_rtmp_ping: ngx_rtmp_send_ping_request", 0);
         ngx_rtmp_finalize_session(s);
         return;
     }
+
+    ngx_log_debug1(NGX_LOG_DEBUG_RTMP, s->connection->log, 0,
+            "ping: ngx_rtmp_ping: ping_active", 0);
 
     s->ping_active = 1;
     ngx_add_timer(pev, cscf->ping_timeout);
@@ -268,6 +284,10 @@ ngx_rtmp_recv(ngx_event_t *rev)
             }
 
             s->ping_reset = 1;
+
+            /* ngx_log_debug1(NGX_LOG_DEBUG_RTMP, c->log, 0, */
+                    /* "ping kinda: got packet", 0); */
+
             ngx_rtmp_update_bandwidth(&ngx_rtmp_bw_in, n);
             b->last += n;
             s->in_bytes += n;
@@ -521,6 +541,9 @@ ngx_rtmp_send(ngx_event_t *wev)
     while (s->out_chain) {
         n = c->send(c, s->out_bpos, s->out_chain->buf->last - s->out_bpos);
 
+        ngx_log_debug1(NGX_LOG_DEBUG_RTMP, s->connection->log, 0,
+                "ping kinda: sent bytes: %d", (int)n);
+
         if (n == NGX_AGAIN || n == 0) {
             ngx_add_timer(c->write, s->timeout);
             if (ngx_handle_write_event(c->write, 0) != NGX_OK) {
@@ -530,12 +553,14 @@ ngx_rtmp_send(ngx_event_t *wev)
         }
 
         if (n < 0) {
+            ngx_log_error(NGX_LOG_INFO, c->log, 0,
+                    "ping kinda:n <0: %d", n);
             ngx_rtmp_finalize_session(s);
             return;
         }
 
         s->out_bytes += n;
-        s->ping_reset = 1;
+        /* s->ping_reset = 1; */
         ngx_rtmp_update_bandwidth(&ngx_rtmp_bw_out, n);
         s->out_bpos += n;
         if (s->out_bpos == s->out_chain->buf->last) {
